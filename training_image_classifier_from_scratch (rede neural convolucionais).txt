@@ -2,13 +2,18 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
-#vamos importar os dados
+#vamos importar os dados que consiste em uma base de dados
+#com imagens de gatos e cachorros
+#baixamos os dados e descompactar os dados
 !curl -O https://download.microsoft.com/download/3/E/1/3E1C3F21-ECDB-4869-8368-6DEBA77B919F/kagglecatsanddogs_3367a.zip
 !unzip -q kagglecatsanddogs_3367a.zip
 !ls
+
+#temos duas pastas: Cat e Dog, cada uma com imagens de um tipo
 !ls PetImages
 
-#vamos filtrar as imagens, retirando as corrompidas
+#em conjuntos de imagens é normal encontrar algumas imagens corrompidas
+#vamos retirar as imagens corrompidas neste conjunto
 import os
 
 num_skipped = 0
@@ -29,7 +34,9 @@ for folder_name in ("Cat", "Dog"):
 
 print("Deleted %d images" % num_skipped)
 
-#vamos gerar o dataset
+#abaixo, vamos separar a base de dados entre treino e validação
+#80% das imagens são utilizadas para treino e os
+#20% restantes para teste (validação)
 image_size = (180, 180)
 batch_size = 32
 
@@ -50,7 +57,9 @@ val_ds = tf.keras.preprocessing.image_dataset_from_directory(
     batch_size=batch_size,
 )
 
-#abaixo, vemosas 9primeiras imagens do training set
+#vamos mostrar as 9 primeiras imagens da base de dados
+#em que o número 1 é associado a cachorros e 0 é associada
+#a gatos
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(10, 10))
@@ -63,6 +72,7 @@ for images, labels in train_ds.take(1):
 
 #como temos um dataset pequeno, vamos introduzir variações nas imagens
 #de treino, girar algumas, para que possamos treinar melhor o modelo
+
 data_augmentation = keras.Sequential(
     [
         layers.experimental.preprocessing.RandomFlip("horizontal"),
@@ -70,6 +80,7 @@ data_augmentation = keras.Sequential(
     ]
 )
 
+#vamos ver como ficam as imagens giradas
 plt.figure(figsize=(10, 10))
 for images, _ in train_ds.take(1):
     for i in range(9):
