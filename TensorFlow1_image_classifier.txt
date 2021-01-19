@@ -1,0 +1,250 @@
+# Vamos fazer a identificação de imagens entre categorias utilizando o tensorflow
+
+# Antes de abrir o python3, precisamos importar a base de dados que vamos utilizar
+# pip3 install -U tensorflow_datasets
+
+import tensorflow as tf
+
+# Vamos importar os datasets que vamos utilizar dentre os que baixamos
+import tensorflow_datasets as tfds
+tfds.disable_progress_bar()
+
+# Temos que importar também algumas outras bibliotecas importantes
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+import logging
+logger = tf.get_logger()
+logger.setLevel(logging.ERROR)
+
+# Vamos separa a base de dados entre 60.000 imagens para treinar o modelos e
+# 10.000 para testar a acurácia do modelo, ver o quanto o modelo aprendeu a
+# classificar imagens
+dataset, metadata = tfds.load('fashion_mnist', as_supervised=True, with_info=True)
+train_dataset, test_dataset = dataset['train'], dataset['test']
+
+# Cada categoria de objeto está associada a um número
+# como os nomes das classes não estão associados à base de dados, vamos
+# guarda-los no objeto class_names para consultar depois
+
+class_names = metadata.features['label'].names
+print("Class names: {}".format(class_names))
+
+# Vamos plotar o número de imagens que fazem parte do conjunto de treino
+# e do conjunto de teste
+
+num_train_examples = metadata.splits['train'].num_examples
+num_test_examples = metadata.splits['test'].num_examples
+print("Number of training examples: {}".format(num_train_examples))
+print("Number of test examples:     {}".format(num_test_examples))
+
+# TRANSFORMAÇÃO IMPORTANTÍSSIMA
+# O valor de cada pixel que compõe as imagens de nosso conjunto de dados é um
+# inteiro que varia entre um intervalo [0,255]. Para que o modelo funcione
+# adequadamente, estes valores tem que ser normalizados, ou seja, variar em
+# um intervalo [0,1]. Então criamos uma função normalizadora e aplicamos a mesma
+# a cada uma de nossas imagens da base de dados
+
+def normalize(images, labels):
+  images = tf.cast(images, tf.float32)
+  images /= 255
+  return images, labels
+
+# A função MAP aplica a normalize a cada uma das imagens, sendo treino ou teste
+
+train_dataset =  train_dataset.map(normalize)
+test_dataset  =  test_dataset.map(normalize)
+
+# Na primeira vez que usarmos o dataset ele será carregado na memória
+# A função cache irá armazenar os dados na memória, tornando o treinamento mais
+# rápido
+
+train_dataset =  train_dataset.cache()
+test_dataset  =  test_dataset.cache()
+
+# Vamos plotar uma imagem para ver como ela se parece
+# Vamos pegar uma única imagem e tirar a dimensão cor
+
+for image, label in test_dataset.take(1):
+  break
+image = image.numpy().reshape((28,28))
+
+# Abaixo, então, temos o comando para plotar a imagem
+
+plt.figure()
+plt.imshow(image, cmap=plt.cm.binary)
+plt.colorbar()
+plt.grid(False)
+plt.show()
+
+# Vamos agora mostrar as primeiras 25 imagens da base de treino e mostrar o nome
+# de cada classe abaixo de cada imagem. Observe que a imagem já está no formato
+# correto, prontos para construir e treinar a rede neural.
+
+plt.figure(figsize=(10,10))
+for i, (image, label) in enumerate(test_dataset.take(25)):
+    image = image.numpy().reshape((28,28))
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(image, cmap=plt.cm.binary)
+    plt.xlabel(class_names[label])
+plt.show()
+
+# A base de uma rede neural são as camadas que são compostas, cada uma, com
+# um determinado número de neurôneos
+# A nossa rede neural é composta de três camadas, que são descritas detalhadamente
+# logo abaixo:
+
+# INPUT: tf.keras.layers.Flatten - Essa é a camada que trasnforma as imagens de um
+# array 2d de 28x28 pixels em um array 1d com 784 pixels (28*28). Essa camada
+# "desempilha" os pixels de uma imagem os os alinha em um único array. Essa camada
+# não treina os dados, mas apenas formata os mesmos para a próxima camada.
+
+# HIDDEN: tf.keras.layers.Dense - Uma camada densa com 128 neurôneos. Cada
+# neurôneo, ou nó, utiliza como insumo todos os 784 nós da camada anterior,
+# ponderando (associando pesos a) essa entrada de acordo com os parâmetros ocultos
+# que serão aprendidos durante o treinamento, e envia um único valor para a
+# próxima camada.
+
+# OUTPUT: tf.keras.layers.Dense - Um conjunto de 128 neurônios seguido por uma
+# camada de 10 nós. Cada nó representa uma classe de roupas, uma categoria. Como
+# na camada anterior, a camada final utiliza como imput os 128 nós da camada
+# anterior a ela e tem como resultado um valor em um intervalo entre [0,1]. Cada
+# um dos valores consiste na probabilidade da imagem avaliada pertencer à classe.
+# A soma dos valores dos 10 nós, portanto, será sempre 10.
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Flatten(input_shape=(28, 28, 1)),
+    tf.keras.layers.Dense(128, activation=tf.nn.relu),
+    tf.keras.layers.Dense(10, activation=tf.nn.softmax)
+])
+
+# Antes de treinar o modelos, precisamos selecionar algumar funções que serão
+# utilizadas depois para avaliar os resutados
+
+# Loss function - Um algorítmo que mensurao quão longe o resultado do modelo
+# está do resultado desejado. Com o treinamento do modelo espera-se que este
+# valor seja baixo
+# Optimizer - Um algorítmo que ajusta os parâmetros internos do modelo com o
+# intúito de reduzir o erro
+# Metrics - Utilizada para monitorar as etapas de treino e teste. Nesse exemplo
+# vamos utilizar a acurácia que informa a porcentagem de imagens que foi
+# corretamento classificada.
+
+model.compile(optimizer='adam',loss=tf.keras.losses.SparseCategoricalCrossentropy(),metrics=['accuracy'])
+
+# Agora vamos treinar o modelo, determinando o comportamento de iteração
+# para os dados de treino
+
+BATCH_SIZE = 32
+train_dataset = train_dataset.cache().repeat().shuffle(num_train_examples).batch(BATCH_SIZE)
+test_dataset = test_dataset.cache().batch(BATCH_SIZE)
+model.fit(train_dataset, epochs=5, steps_per_epoch=math.ceil(num_train_examples/BATCH_SIZE))
+
+# Agora que o modelo foi treinado, vamos avaliar sua acurácia
+
+test_loss, test_accuracy = model.evaluate(test_dataset, steps=math.ceil(num_test_examples/32))
+print('Accuracy on test dataset:', test_accuracy)
+
+# Por fim, vamos fazer algumas previsões sobre a categoria a qual uma foto pertence
+
+for test_images, test_labels in test_dataset.take(1):
+  test_images = test_images.numpy()
+  test_labels = test_labels.numpy()
+  predictions = model.predict(test_images)
+
+predictions.shape
+
+# Vamos ver qual foi a previsão para a primeira imagem do conjunto de teste
+# Vemos abaixo que a imagem tem mais chance de se encaixar na categoria 6
+
+predictions[0]
+np.argmax(predictions[0])
+test_labels[0]
+
+# Podemos ter uma visualização dos resultados como um todo avaliando a previsão
+# para as dez classes como um todo
+
+def plot_image(i, predictions_array, true_labels, images):
+  predictions_array, true_label, img = predictions_array[i], true_labels[i], images[i]
+  plt.grid(False)
+  plt.xticks([])
+  plt.yticks([])
+  
+  plt.imshow(img[...,0], cmap=plt.cm.binary)
+
+  predicted_label = np.argmax(predictions_array)
+  if predicted_label == true_label:
+    color = 'blue'
+  else:
+    color = 'red'
+  
+  plt.xlabel("{} {:2.0f}% ({})".format(class_names[predicted_label],
+                                100*np.max(predictions_array),
+                                class_names[true_label]),
+                                color=color)
+
+#
+
+def plot_value_array(i, predictions_array, true_label):
+  predictions_array, true_label = predictions_array[i], true_label[i]
+  plt.grid(False)
+  plt.xticks([])
+  plt.yticks([])
+  thisplot = plt.bar(range(10), predictions_array, color="#777777")
+  plt.ylim([0, 1]) 
+  predicted_label = np.argmax(predictions_array)
+  
+  thisplot[predicted_label].set_color('red')
+  thisplot[true_label].set_color('blue')
+
+# Vamos dar uma olhada na primeira imagem e nas previsões
+
+i = 0
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predictions, test_labels, test_images)
+plt.subplot(1,2,2)
+plot_value_array(i, predictions, test_labels)
+
+i = 12
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predictions, test_labels, test_images)
+plt.subplot(1,2,2)
+plot_value_array(i, predictions, test_labels)
+
+# Vamos plotar as imagens com suas previsões
+
+# Plot the first X test images, their predicted label, and the true label
+# Color correct predictions in blue, incorrect predictions in red
+num_rows = 5
+num_cols = 3
+num_images = num_rows*num_cols
+plt.figure(figsize=(2*2*num_cols, 2*num_rows))
+for i in range(num_images):
+  plt.subplot(num_rows, 2*num_cols, 2*i+1)
+  plot_image(i, predictions, test_labels, test_images)
+  plt.subplot(num_rows, 2*num_cols, 2*i+2)
+  plot_value_array(i, predictions, test_labels)
+
+# Por fim, vamos utilizar o modelo para fazer uma previsão de uma imagem
+# específica
+
+img = test_images[0]
+print(img.shape)
+img = np.array([img])
+print(img.shape)
+
+# Agora vamos prever
+
+predictions_single = model.predict(img)
+print(predictions_single)
+plot_value_array(0, predictions_single, test_labels)
+_ = plt.xticks(range(10), class_names, rotation=45)
+
+# Vamos ver o resultado apenas para a primeira imagem, não para todas
+
+np.argmax(predictions_single[0])
