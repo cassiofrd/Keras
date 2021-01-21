@@ -1,0 +1,171 @@
+# CNN com imagens coloridas e de diferentes tamanhos
+
+# primeiro vamos importar os pacotes que iremos utilizar
+
+import tensorflow as tf
+
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+
+import os
+import matplotlib.pyplot as plt
+import numpy as np
+
+import logging
+logger = tf.get_logger()
+logger.setLevel(logging.ERROR)
+
+# Vamos utilizar como dados imagens de cães e gatos coloridas e de diferentes
+# tamanhos. Os tamanhos serão ajustados, pois devemos colocar todas nas mesmas
+# dimensões. Posteriormente, como as fotos são coloridas, ao fazer as convoluções
+# teremos que utilizar três kernels/filtros, pois as imagens coloridas nada mais
+# são que uma combinação de três imagens em vermelho, verde e azul cuja combinação
+# vai dar a imagem colorida. Após a aplicação do kernel, vamos somar os resultados
+# da aplicação do filtros nos valores dos pixels e gerando umaúltima tabela de
+# valores (de três tabelas, vermelha, verde e azul, terminamos com uma). Nessa
+# tabela de valores aplicamos o masxpooling e aplicamos a rede convolucional.
+
+# Vamos baixar os dados de fotos de cães e gatos do Microsoft Research
+# vamos utilizar a classe tf.keras.preprocessing.image.ImageDataGenerator
+# para ler dados do disco. Então precisamos baixar os dados e descompacta-los
+
+_URL = 'https://storage.googleapis.com/mledu-datasets/cats_and_dogs_filtered.zip'
+zip_dir = tf.keras.utils.get_file('cats_and_dogs_filterted.zip', origin=_URL, extract=True)
+
+# Vamos separar os dados entre treino e validação
+
+base_dir = os.path.join(os.path.dirname(zip_dir), 'cats_and_dogs_filtered')
+train_dir = os.path.join(base_dir, 'train')
+validation_dir = os.path.join(base_dir, 'validation')
+
+train_cats_dir = os.path.join(train_dir, 'cats')  # directory with our training cat pictures
+train_dogs_dir = os.path.join(train_dir, 'dogs')  # directory with our training dog pictures
+validation_cats_dir = os.path.join(validation_dir, 'cats')  # directory with our validation cat pictures
+validation_dogs_dir = os.path.join(validation_dir, 'dogs')  # directory with our validation dog pictures
+
+# vamos ver agora quantas fotos temos em cada um dos grupos: teste e validação
+
+num_cats_tr = len(os.listdir(train_cats_dir))
+num_dogs_tr = len(os.listdir(train_dogs_dir))
+num_cats_val = len(os.listdir(validation_cats_dir))
+num_dogs_val = len(os.listdir(validation_dogs_dir))
+total_train = num_cats_tr + num_dogs_tr
+total_val = num_cats_val + num_dogs_val
+
+print('total training cat images:', num_cats_tr)
+print('total training dog images:', num_dogs_tr)
+print('total validation cat images:', num_cats_val)
+print('total validation dog images:', num_dogs_val)
+print("--")
+print("Total training images:", total_train)
+print("Total validation images:", total_val)
+
+# Vamos estabelecer os parâmetros que iremos utilizar em nosso modelo
+
+BATCH_SIZE = 100  # Number of training examples to process before updating our models variables
+IMG_SHAPE  = 150  # Our training data consists of images with width of 150 pixels and height of 150 pixels
+
+# Agora vai uma parte mais importante, a preparação dos dados para utilizar
+# Vamos cumprir as seguintes etapas
+# 1 - Ler as imagens do disco
+# 2 - Decodificar o conteudo das imagens e converter em outro formato
+# 3 - Converter os mesmo em formato floating
+# 4 - Redimensionar os tensores de valores entre 0 e 255 para valores entre 0 e 1
+# Felizmente, tudo isso pode ser feito com a classe tf.keras.preprocessing.image.ImageDataGenerator
+# sendo todas essas etapas cobertas com as duas linhas seguintes
+
+train_image_generator = ImageDataGenerator(rescale=1./255)  # Generator for our training data
+validation_image_generator = ImageDataGenerator(rescale=1./255)  # Generator for our validation data
+
+# Utilizando flow_from_directory irá carregar as imagens no discos, modificar
+# a escala da mesma e modificar o tamanho (todas para 150x150 pixels) utilizando
+# uma única linha de código para cada conjunto (treino e teste).
+
+train_data_gen = train_image_generator.flow_from_directory(batch_size=BATCH_SIZE,directory=train_dir,shuffle=True,target_size=(IMG_SHAPE,IMG_SHAPE), class_mode='binary') #com IMG_SHAPE=150
+val_data_gen = validation_image_generator.flow_from_directory(batch_size=BATCH_SIZE,directory=validation_dir,shuffle=False,target_size=(IMG_SHAPE,IMG_SHAPE), class_mode='binary') #com IMG_SHAPE=150
+
+# Vamos vizualixar algumas imagens da nossa base de treino no formato 1 linha 5 colunas
+
+sample_training_images, _ = next(train_data_gen)
+
+def plotImages(images_arr):
+    fig, axes = plt.subplots(1, 5, figsize=(20,20))
+    axes = axes.flatten()
+    for img, ax in zip(images_arr, axes):
+        ax.imshow(img)
+    plt.tight_layout()
+    plt.show()
+
+plotImages(sample_training_images[:5])  # Plot images 0-4
+
+# Definindo nosso modelo de convolução
+# Vamos utilizar quatro blocos de convolução com um maxpooling para cada
+
+model = tf.keras.models.Sequential([
+    tf.keras.layers.Conv2D(32, (3,3), activation='relu', input_shape=(150, 150, 3)),
+    tf.keras.layers.MaxPooling2D(2, 2),
+
+    tf.keras.layers.Conv2D(64, (3,3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2,2),
+    
+    tf.keras.layers.Conv2D(128, (3,3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2,2),
+    
+    tf.keras.layers.Conv2D(128, (3,3), activation='relu'),
+    tf.keras.layers.MaxPooling2D(2,2),
+    
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(512, activation='relu'),
+    tf.keras.layers.Dense(2)
+])
+
+# Vamos agora estabelecer os parâmetros de otimização e de avaliação do modelo
+
+model.compile(optimizer='adam',
+              loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+              metrics=['accuracy'])
+
+# O método summary() nos dá informações sobre nossa rede neural
+
+model.summary()
+
+# Agora vamos treinar o modelo
+
+EPOCHS = 5 #deveríamos colocar 100, mas no compoutador pessoal não aguenta
+history = model.fit_generator(
+    train_data_gen,
+    steps_per_epoch=int(np.ceil(total_train / float(BATCH_SIZE))),
+    epochs=EPOCHS,
+    validation_data=val_data_gen,
+    validation_steps=int(np.ceil(total_val / float(BATCH_SIZE)))
+)
+
+# Agora vamos visualizar os resultados que obtivemos após treinar o modelo
+# vemos no gráfico que quanto mais treinamos o modelo melhor a acurácia
+# tanto da base de treino quanto da base de teste, mas seria necessário treinar
+# bem mais para ficar acima de 90%, mas não consigo no computador pessoal
+
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs_range = range(EPOCHS)
+
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, acc, label='Training Accuracy')
+plt.plot(epochs_range, val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, loss, label='Training Loss')
+plt.plot(epochs_range, val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.savefig('./foo.png')
+plt.show()
+
+
+
