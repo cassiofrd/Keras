@@ -1,0 +1,235 @@
+# Tensorflow hub e tensorflow learning
+# O TensorFlow hub é um repositório online com modelos já treinados do TensorFlow
+# que você pode usar, ou os modelos podem ser usado para Transfer Learnin, que
+# envolve fazer modificações no modelo.
+# Tensorflow learning é um processo onde você pega um modelo existente já treinado
+# é pode expandi-lo. Deve-se deixar intacto o modelo e adcionando e treinando as
+# últimas camadas de modo a obter um conjunto diferente de resultados possíveis.
+
+# Vamos importar alguns métodos. Vamos começar importando o tensorflow_hub.
+
+import tensorflow as tf
+
+import matplotlib.pylab as plt
+
+import tensorflow_hub as hub
+import tensorflow_datasets as tfds
+
+from tensorflow.keras import layers
+
+import logging
+logger = tf.get_logger()
+logger.setLevel(logging.ERROR)
+
+# Vamos, então pegar um modelo treinado. Esse modelo que vamos pegar, MobileNet
+# utiliza como insumo imagens no formato 224 x 224 pixels em três canais (RGB ou
+# vermelho, verde e azul)
+
+CLASSIFIER_URL ="https://tfhub.dev/google/tf2-preview/mobilenet_v2/classification/2"
+IMAGE_RES = 224
+
+model = tf.keras.Sequential([
+    hub.KerasLayer(CLASSIFIER_URL, input_shape=(IMAGE_RES, IMAGE_RES, 3))
+])
+
+# O modelo que vamos utilizar, MobileNet foi treinado na base de dados ImageNet
+# que tem como resultado mil classes diferentes, e uma delas é uniforme militar.
+# Vamos pegar uma imagem de uniforme militar que não está presente no modelo e
+# ver se o nosso modelo consegue prever que a imagem é de um uniforme militar
+
+import numpy as np
+import PIL.Image as Image
+
+grace_hopper = tf.keras.utils.get_file('image.jpg','https://storage.googleapis.com/download.tensorflow.org/example_images/grace_hopper.jpg')
+grace_hopper = Image.open(grace_hopper).resize((IMAGE_RES, IMAGE_RES))
+grace_hopper.show()
+
+grace_hopper = np.array(grace_hopper)/255.0
+grace_hopper.shape
+
+result = model.predict(grace_hopper[np.newaxis, ...])
+result.shape
+
+predicted_class = np.argmax(result[0], axis=-1)
+predicted_class
+
+# Para ver quais são as possíveis classes que queremos prever, devemos baixar o
+# módulo ImageNet que contém todas as categorias previstas pelo modelo
+
+labels_path = tf.keras.utils.get_file('ImageNetLabels.txt','https://storage.googleapis.com/download.tensorflow.org/data/ImageNetLabels.txt')
+imagenet_labels = np.array(open(labels_path).read().splitlines())
+
+plt.imshow(grace_hopper)
+plt.axis('off')
+predicted_class_name = imagenet_labels[predicted_class]
+_ = plt.title("Prediction: " + predicted_class_name.title())
+_
+
+# Como vimos acima, o modelo previu corretamente a categoria da foto que analisamos
+# Agora vamos utilizar um modelo do TensorFlow Hub para prever a nossa base de
+# dados com cães e gatos
+# Vamos utilizar todo o modelo MobileNet para ver qual seria a sua performance
+# preditiva na base de dados de gatos e cachorros.
+
+# Vamos utilizar o TensorFlow Datasets para carregar a base de dados Dogs vs Cats
+# Obs: O tfds abaixo faz referência ao tensorflow dataset, de onde vamos baixar
+# os dados.
+
+(train_examples, validation_examples), info = tfds.load(
+    'cats_vs_dogs', 
+    with_info=True, 
+    as_supervised=True, 
+    split=['train[:80%]', 'train[80%:]'],
+)
+
+num_examples = info.splits['train'].num_examples
+num_classes = info.features['label'].num_classes
+
+# As imagens da base de dados não são do mesmo tamanho
+# Vamos ver abaixo três exemplos aleatórios de tamanhos, em pixels
+
+for i, example_image in enumerate(train_examples.take(3)):
+  print("Image {} shape: {}".format(i+1, example_image[0].shape))
+
+# Temos que reformatar todas as imagens em uma dimensão de 224 por 224 pixels
+
+def format_image(image, label):
+  image = tf.image.resize(image, (IMAGE_RES, IMAGE_RES))/255.0
+  return image, label
+
+BATCH_SIZE = 32
+
+train_batches      = train_examples.shuffle(num_examples//4).map(format_image).batch(BATCH_SIZE).prefetch(1)
+validation_batches = validation_examples.map(format_image).batch(BATCH_SIZE).prefetch(1)
+
+# Devemos ter em mente que nosso modelo ainda é o MobileNet, treinado com a base ImageNet
+# Sendo assim, ele tem um total de 1000 possíveis classes como resultados. ImageNet tem
+# um conjunto grande de cachorros e gatos nela, então vamos ver se o modelo é
+# capaz de prever de qual tipo são nossas imagens, mesmo não tendo sido o modelo
+# treinado para prever unicamente cães e gatos, mas também estes.
+
+image_batch, label_batch = next(iter(train_batches.take(1)))
+image_batch = image_batch.numpy()
+label_batch = label_batch.numpy()
+
+result_batch = model.predict(image_batch)
+
+predicted_class_names = imagenet_labels[np.argmax(result_batch, axis=-1)]
+predicted_class_names
+
+# Observando os nomes acima vemos que, aparentemente, o modelo previu corretamente
+# pois só temos nomes de raças de cães e gatos. Vejamos então as imagens e os grupos
+# que o modelo previu que eles pertenciam para ver se acertou
+
+plt.figure(figsize=(10,9))
+for n in range(30):
+  plt.subplot(6,5,n+1)
+  plt.subplots_adjust(hspace = 0.3)
+  plt.imshow(image_batch[n])
+  plt.title(predicted_class_names[n])
+  plt.axis('off')
+
+plt.show()
+
+# Vamos fazer um transfer learning simples com TensorFlow Hub
+# Transfer learning nós reutilizamos partes do modelo já treinado modificando
+# a última camada ou mais. Após isso, retreinamos essas camadas com nossa própria
+# base de dados.
+# É importante salientar que, além dos modelos completos, o TensorFlow Hub também
+# distribui modelos sem a última camada, que seria a camada da classificação,
+# a que tem as categorias que gostaríamos de prever. Estes modelos são úteis por
+# possibilitarem fazer transfer learning de uma maneira mais fácil.
+# Vamos chamar o modelo parcial do TensorFlow Hub (o modelo sem a última camada)
+# de feature_extractor
+
+URL = "https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2"
+feature_extractor = hub.KerasLayer(URL,input_shape=(IMAGE_RES, IMAGE_RES,3))
+
+# O comando abaixo nos informa a quantidade de imagens assim como a quantidade
+# de neurôneos na última camada
+
+feature_batch = feature_extractor(image_batch)
+print(feature_batch.shape)
+
+# Vamos congelar o modelo para todas as camadas exceto a última, que contém as
+# categorias. Ou seja, o treinamento só vai modificar a última camada, a que
+# contém as categorias entre as quais as imagens serão classificadas.
+
+feature_extractor.trainable = False
+
+# Vamos então adcionar uma nova camada em tf.keras.Sequential
+
+model = tf.keras.Sequential([
+  feature_extractor,
+  layers.Dense(2)
+])
+
+model.summary()
+
+# Agora vamos treinar o modelo, como qualquer outro, primeiro utilizando compile
+# seguido pelo fit
+
+model.compile(optimizer='adam',loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),metrics=['accuracy'])
+
+# Vamos colocar EPOCHS=1, o correto era 6 mas meu computador não guenta.
+EPOCHS = 1
+history = model.fit(train_batches,epochs=EPOCHS,validation_data=validation_batches)
+
+# Vamos plotar agora os gráficos de accuracy e loss
+
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs_range = range(EPOCHS)
+
+plt.figure(figsize=(8, 8))
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, acc, label='Training Accuracy')
+plt.plot(epochs_range, val_acc, label='Validation Accuracy')
+plt.legend(loc='lower right')
+plt.title('Training and Validation Accuracy')
+
+plt.subplot(1, 2, 2)
+plt.plot(epochs_range, loss, label='Training Loss')
+plt.plot(epochs_range, val_loss, label='Validation Loss')
+plt.legend(loc='upper right')
+plt.title('Training and Validation Loss')
+plt.show()
+
+# Por fim vamos checar as previsões
+# Iniciando plotando a lista de classes
+
+class_names = np.array(info.features['label'].names)
+class_names
+
+# Convertendo os índices para nomes de classes
+
+predicted_batch = model.predict(image_batch)
+predicted_batch = tf.squeeze(predicted_batch).numpy()
+predicted_ids = np.argmax(predicted_batch, axis=-1)
+predicted_class_names = class_names[predicted_ids]
+predicted_class_names
+
+# Vamos ver os dados verdadeiros e os previstos
+
+print("Labels: ", label_batch)
+print("Predicted labels: ", predicted_ids)
+
+plt.figure(figsize=(10,9))
+for n in range(30):
+  plt.subplot(6,5,n+1)
+  plt.subplots_adjust(hspace = 0.3)
+  plt.imshow(image_batch[n])
+  color = "blue" if predicted_ids[n] == label_batch[n] else "red"
+  plt.title(predicted_class_names[n].title(), color=color)
+  plt.axis('off')
+
+_ = plt.suptitle("Model predictions (blue: correct, red: incorrect)")
+
+
+
+
+
