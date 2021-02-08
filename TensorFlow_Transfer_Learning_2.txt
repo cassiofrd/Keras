@@ -2,6 +2,9 @@
 # um modelo já treinado em uma basa grande pra buné.
 # Vamos importar os pacotes que vamos utilizar
 
+### Passo 1: Baixar os módulos necessários e preparar a base de dados
+#####################################################################
+
 #intertools module implements a number of iterator building blocks
 import itertools
 #os module provides a portable way of using operating system dependent functionality
@@ -42,22 +45,70 @@ BATCH_SIZE = 32
 
 # Vamos agora selecionar a base de dados que queremos utilizar
 # Temos que reajustar o tamanho das imagens.
+# O comando tf.keras.utils.get_file importa um arquivo de um endereço de URL,
+# sendo os campos desta função primeiro o nome que vamos usar no arquivo, no nosso
+# caso flower_photos, segundo o endereço URL do arquivo, "untar" identifica se o
+# arquivo deve ser descompactado, no nosso caso sim pois untar=True
 
 data_dir = tf.keras.utils.get_file(
     'flower_photos',
     'https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz',
     untar=True)
 
+# Abaixo vamos gerar dois dicionários com valores de parâmetros que vamos utilizar
+# para montar nossa rede. rescalo se refere à mudança de escala pois os pixels
+# tem valores que variam de 0 a 255, mas nós precisamos que variem emtre 0 e 1
+# para o melhor funcionamento da rede neural. Já o validation_split informa a
+# proporção na qual vamos dividir nossa base de dados, nesse caso 80% treino e
+# 20% teste
+
 datagen_kwargs = dict(rescale=1./255, validation_split=.20)
+
+# No próximo dicionário criado colocamos o target_size que consiste no tamanho da
+# imagem que vamos utilizar como padrão, pois aqueles que não estiverem nesse
+# padrão serão redimensionadas. Já o batch_size definimos quantas imagens vamos
+# utilizar para treinar o modelo por vez. Como não existe um valor padrão devemos
+# testar mais de um e ver como ficam os resultados do modelo. Normalmente utilizamos
+# múltiplos de 32 (64,128,256,512,1024,2048,...), variando com o tamanho da
+# amostra. interpolation quer dizer que escolhemos a interpolação bilinear,
+# primeiro na dimensão x e depois na dimensão y da imagem. Como em qualquer
+# interpolação o que temos é uma aproximação numérica dos valores associados
+# a imagem considerando todos os pixels da mesma.
 
 dataflow_kwargs = dict(target_size=IMAGE_SIZE, batch_size=BATCH_SIZE,
                    interpolation="bilinear")
 
+# Vamos separar a base de teste (validação)
+# A função tf.keras.preprocessing.image.ImageDataGenerator gera "batchs" de
+# imagens com com "augmentation" (aumentar a variabilidade dos dados por meio
+# de transformações, tipo rotação das imagens)
+# Abaixo, a utilização de ** no dicionário apenas extrai os valores das chaves,
+# que como vimos são rescale e validation_split, como parâmetros da função. Ou seja,
+# os parâmetros dessa função são o valor pelo qual multiplicamos todos os pixels
+# para que fiquem padronizados no intervalo entre 0 e 1 e a proporção que queremos
+# utilizar para separação de dados entre treino e teste.
+
 valid_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
     **datagen_kwargs)
 
+# A função flow_from_directory pega o caminho para um diretório, no caso o caminho
+# salvo em data_dir e gera os batchs de dados. Como vemos, utilizamos como parâmetros
+# o diretório dos dados, selecionamos o dados como validação, não fazemos
+# transformações (shuffle=False) e utilizamos como parâmetros os dados salvos
+# no dicionário dataflow_kwargs (IMAGE_SIZE, BATCH_SIZE e bilinear). Assim,
+# terminamos a preparação da base de validação
+
 valid_generator = valid_datagen.flow_from_directory(
     data_dir, subset="validation", shuffle=False, **dataflow_kwargs)
+
+# Vamos preparar a base de teste, que são os 80%
+# Abaixo temos a função que promove uma série de transformções na base de treino
+# Cada linha abaixo corresponde a uma transformação (rotação, mudança no sentido
+# horizontalmente, etc)
+# IMPORTANTÍSSIMO: como vemos, é a mesma função que utilizamos na base de treino
+# com a diferença que, além da padronização de IMAGE_SIZE, BATCH_SIZE e bilinear,
+# fazemos as demais transformações que vão acrescentar variabilidade à base de
+# dados e reduzir a probabilidade de overfitting.
 
 do_data_augmentation = False
 
@@ -74,13 +125,24 @@ else:
 train_generator = train_datagen.flow_from_directory(
     data_dir, subset="training", shuffle=True, **dataflow_kwargs)
 
+### Passo 2: Definir os parâmetros da nossa rede neural
+#######################################################
+
+# Já preparamos a base de dados, vamos agora definir os parâmetros do modelo
 # Vamos agora definir o modelo
 # Tudo o que temos que fazer é adcionar um classificador linear no topo do
 # feature_extractor_layer com o modelo do Hub.
+# Logo abaixo definimos o parâmetros do_fine_tuning=False, que iremos utilizar
+# para configurar a nossa rede neural
 
 do_fine_tuning = False
 
+# Abaixo temos o endereço com o modelo que vamos utilizar no nosso transfer
+# learning
+
 print("Building model with", MODULE_HANDLE)
+
+# Segue o modelo já com todos os parâmetros configurados
 
 model = tf.keras.Sequential([
     # Explicitly define the input shape so the model can be properly
@@ -94,18 +156,42 @@ model = tf.keras.Sequential([
 
 model.build((None,)+IMAGE_SIZE+(3,))
 
+# Por fim, vamos ver como ficou o modelo que vamos utilizar, lembrando que ele
+# foi baixado do tensorflowhub, ou seja, já foi treinado, não só vamos treina-lo
+# um pouco mais com a nossa base de dados
+
 model.summary()
 
+### Passo 3: Treinar o modelo
+#############################
+
 # Vamos então treinar o modelo
+# Agora, vamos especificar os parâmetros para o treino (função de otimização,
+# loss e metric)
 
 model.compile(
   optimizer=tf.keras.optimizers.SGD(lr=0.005, momentum=0.9), 
   loss=tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=0.1),
   metrics=['accuracy'])
 
+# steps_per_epoch é quantos batch_size vamos utilizar até treinar o modelo
+# como vemos, simplesmente dividimos o número de observações na base treino e
+# o tamanho que estabelecemos para o batch_size. Como utilizamos o // no lugar de
+# /, estamos desconsiderando o resto da divisão, ficando apenas com a parte
+# inteira da divisão, desconsiderando o que vem após a vírgula.
+
 steps_per_epoch = train_generator.samples // train_generator.batch_size
 
+# validation_steps a lógica é a mesma, com a diferença de que dividimos o número
+# de observações na base teste pelo número de batch_size
+
 validation_steps = valid_generator.samples // valid_generator.batch_size
+
+# Agora já temos todos os parâmetros que precisamos para treinar o modelo: as duas
+# bases, de treino e teste, já tratadas, train_generator e valid_generator
+# ATENÇÃO: CASO VOCÊ FOR TREINAR O MODELO EM SUA MÁQUINA PESSOA, COLOQUE EPOCHS=1
+# POIS CASO CONTRÁRIO O PROCESSO IRIA DEMORAR DEMAIS, MAS O CORRETO É VOCÊ
+# COLOCAR EPOCHS=5 E, SE NECESSÁRIO, UTILIZAR PROCESSAMENTO DISTRIBUIDO.
 
 hist = model.fit(
     train_generator,
@@ -113,7 +199,8 @@ hist = model.fit(
     validation_data=valid_generator,
     validation_steps=validation_steps).history
 
-# Treinado o modelo, vamos plotar algumas imagens
+# Treinado o modelo, vamos plotar algumas imagens que nos mostram como variáram
+# as estatísticas de acurária a medida que este foi treinado mais de uma vez
 
 plt.figure()
 plt.ylabel("Loss (training and validation)")
@@ -123,6 +210,8 @@ plt.plot(hist["loss"])
 plt.plot(hist["val_loss"])
 plt.show()
 
+# Vamos plotar mais algumas medidas
+
 plt.figure()
 plt.ylabel("Accuracy (training and validation)")
 plt.xlabel("Training Steps")
@@ -131,7 +220,8 @@ plt.plot(hist["accuracy"])
 plt.plot(hist["val_accuracy"])
 plt.show()
 
-# Vamos ver o resultado do modelo utilizando uma imagem da nossa base de teste
+# Vamos utilizar nossa base de teste para, logo em seguida, aplicar o modelo
+# Abaixo, plotamos a imagem que queremos prever
 
 def get_class_string_from_index(index):
    for class_string, class_index in valid_generator.class_indices.items():
@@ -145,7 +235,9 @@ plt.imshow(image)
 plt.axis('off')
 plt.show()
 
-# Expand the validation image to (1, 224, 224, 3) before predicting the label
+# Vamos, por fim, ver qual foi o resultado da aplicação do modelo a uma imagem,
+# vejamos qual é o tipo real da imagem e logo depois o que o modelo previu
+
 prediction_scores = model.predict(np.expand_dims(image, axis=0))
 predicted_index = np.argmax(prediction_scores)
 print("True label: " + get_class_string_from_index(true_index))
@@ -156,6 +248,7 @@ print("Predicted label: " + get_class_string_from_index(predicted_index))
 
 saved_model_path = "/tmp/saved_flowers_model"
 tf.saved_model.save(model, saved_model_path)
+
 
 
 
