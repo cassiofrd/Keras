@@ -34,7 +34,9 @@ print("Using {} with input size {}".format(MODULE_HANDLE, IMAGE_SIZE))
 # o BATCH_SIZE é um parâmetro muito importante na rede neural pois ele define de quantas
 # em quantas observações na amostra vamos treinar nosso modelo. Como escolhemos o
 # BATCH_SIZE=32 treinamos a rede de 32 em 32 (treinamos com as 32 primeiras imagens,
-# depois com as próximas 32, e por ai vai)
+# depois com as próximas 32, e por ai vai). A vantagem de se utilizar BATCH_SIZE menor
+# que o número de observações total é que utilizamos menos memória para cada rodada
+# de treinamentos de nossa rede neural.
 
 BATCH_SIZE = 32
 
