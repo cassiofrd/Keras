@@ -40,8 +40,13 @@ print("Using {} with input size {}".format(MODULE_HANDLE, IMAGE_SIZE))
 # depois com as próximas 32, e por ai vai). A vantagem de se utilizar BATCH_SIZE menor
 # que o número de observações total é que utilizamos menos memória para cada rodada
 # de treinamentos de nossa rede neural.
+# IMPORTANTE: utilizamos normalmente múltiplos de 32 (64,128,256,512,1024,...) como
+# valores de BATCH_SIZE. Para valores menores de BATCH_SIZE consigomos treinar um
+# modelo mais de uma vez (EPOCHS>1), pois reduz nossa necessidade de memória para
+# treinar o modelo. Devemos apenas tomar cuidado com a possibilidade de ocorrer
+# overfiting.
 
-BATCH_SIZE = 512
+BATCH_SIZE = 32
 
 # Vamos agora selecionar a base de dados que queremos utilizar
 # Temos que reajustar o tamanho das imagens.
