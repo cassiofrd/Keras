@@ -2,9 +2,12 @@
 # um modelo já treinado em uma basa grande pra buné.
 # Vamos importar os pacotes que vamos utilizar
 
+#intertools module implements a number of iterator building blocks
 import itertools
+#os module provides a portable way of using operating system dependent functionality
 import os
 
+#PyLab is a procedural interface to the Matplotlib object-oriented plotting library.
 import matplotlib.pylab as plt
 import numpy as np
 
@@ -19,11 +22,19 @@ print("GPU is", "available" if tf.test.is_gpu_available() else "NOT AVAILABLE")
 # modelo que já foi treinado anteriormente com uma base de dados muito maior e que
 # vamos aproveitar para a nossa base
 
+# abaixo temos uma tupla na qual colocamos o modelo que vamos utilizar no tensorflow hub
+# e o número de pixels para os quais vamos redimensionar as imagens
+
 module_selection = ("mobilenet_v2_100_224", 224)
 handle_base, pixels = module_selection
 MODULE_HANDLE ="https://tfhub.dev/google/imagenet/{}/feature_vector/4".format(handle_base)
 IMAGE_SIZE = (pixels, pixels)
 print("Using {} with input size {}".format(MODULE_HANDLE, IMAGE_SIZE))
+
+# o BATCH_SIZE é um parâmetro muito importante na rede neural pois ele define de quantas
+# em quantas observações na amostra vamos treinar nosso modelo. Como escolhemos o
+# BATCH_SIZE=32 treinamos a rede de 32 em 32 (treinamos com as 32 primeiras imagens,
+# depois com as próximas 32, e por ai vai)
 
 BATCH_SIZE = 32
 
