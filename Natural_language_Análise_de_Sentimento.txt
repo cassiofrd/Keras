@@ -1,0 +1,218 @@
+# Há várias maneiras de melhorar a performance de um modelo, por exemplo:
+## 1) Selecionar um número fixo n, as n palavras mais populares nas sentenças, pois
+## superlotar a base com palavras irrelevantes piora a acurácia.
+## 2) Determinar um número de palavras para a partir deste valor truncar as
+## sentenças, gerando arrays menores, o que, para uma amostra grande, é bom
+## pois as palavras mais relevantes já tendem a se repetir considerando apenas
+## uma parte das sentenças.
+## 3) "Padding" antes ou depois, ou seja, completar com strings ou zeros antes
+## das sentenças e também tentar completando depois, para ver se da diferença.
+## 4) O número de dimensões expecificadas no "embedding" não influencía a acurácia
+## do modelo, mas sua velocidade.
+
+# Obs: Podemos utilizar "subwords" para treinar o modelo, ou seja, treinar com
+# base nas palavras inteiras assim como em partes que mais aparecem, mas eu não
+# utilizei pelo risco de acrescentar uma variabilidade que não necessariamente
+# melhore a correlação com os sentimentos, podendo piorar as correlações
+
+# Vamos fazer análise de sentimento tendo como insumo as sentenças de avaliação
+# de produtos, estando cada avaliação associada ao valor 1 se for uma avaliação
+# favorável (positiva) ou 0 se for desfavorável (negativa)
+
+# Vamos importar algumas bibliotecas que vamos utilizar
+
+import tensorflow as tf
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+import numpy as np
+import pandas as pd
+
+# Agora vamos importa a base de dados
+
+path = tf.keras.utils.get_file('reviews.csv','https://drive.google.com/uc?id=13ySLC_ue6Umt9RJYSeM2t-V0kCv-4C-P')
+print (path)
+dataset = pd.read_csv(path)
+
+sentences = dataset['text'].tolist()
+labels = dataset['sentiment'].tolist()
+
+# Vamos separar as duas colunas da base de dados entre treino e teste
+# em que 80% será treino e 20% teste.
+
+training_size = int(len(sentences) * 0.8)
+
+training_sentences = sentences[0:training_size]
+testing_sentences = sentences[training_size:]
+training_labels = labels[0:training_size]
+testing_labels = labels[training_size:]
+
+# Temos que transformar a coluna de 1's e 0's em arrays, que consiste em uma
+# lista de números todos de mesmo tipo (no nosso caso, INT)
+
+training_labels_final = np.array(training_labels)
+testing_labels_final = np.array(testing_labels)
+
+# Agora vamos tokenizar a base de dados, PASSO IMPORTANTÍSSIMO
+# Vamos estipular que utilizaremos apelas as 1000 palavras mais populares
+# O embedding (vetor associado a uma palavra, sendo que cada palavra tem o seu)
+# que é definido como 16. Vamos definir como valor máximo do vetor de números
+# associados a cada palavra como 100. Ou seja, será considerado apenas as 100
+# primeiras palavras de cada sentença.
+
+########### IMPORTANTÍSSIMO
+# Os parâmetros abaixo são os principais para determinar a acurácia do modelo
+# I- vocab_size (as n-ésimas palavras mais populares, que serão as consieradas)
+# por exemplo, poderia ser reduzido de 1000 para 500, considerando apenas as
+# palavras mais relevantes.
+# II- embedding_dim pode ser modificado para mais ou menos, mas só influencia
+# a velocidade do modelo, não sua acurácia.
+# III- max_length (n primeiras palavras das sentenças) ao ser reduzido pode
+# melhorar também a acurácia do modelo, pois concentra a análise em palavras
+# que mais apareceram, reduzindo a variabilidade dos dados e melhorando a
+# acurácia.
+# IV- truc_type e padding_type também podem ser modificados, mas não tendem a
+# modificar tanto a acurácia quanto os ítens vocab_size e max_length, que são os
+# mais importantes.
+
+vocab_size = 1000
+embedding_dim = 16
+max_length = 100
+trunc_type='post'
+padding_type='post'
+oov_tok = "<OOV>"
+
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+tokenizer = Tokenizer(num_words = vocab_size, oov_token=oov_tok)
+tokenizer.fit_on_texts(training_sentences)
+word_index = tokenizer.word_index
+sequences = tokenizer.texts_to_sequences(training_sentences)
+padded = pad_sequences(sequences,maxlen=max_length, padding=padding_type,truncating=trunc_type)
+
+testing_sequences = tokenizer.texts_to_sequences(testing_sentences)
+testing_padded = pad_sequences(testing_sequences,maxlen=max_length, padding=padding_type, truncating=trunc_type)
+
+# Vamos dar uma olhada em como ficou a sequência apenas para ter certeza que
+# tudo funcionou corretamente.
+
+reverse_word_index = dict([(value, key) for (key, value) in word_index.items()])
+
+def decode_review(text): return ' '.join([reverse_word_index.get(i, '?') for i in text])
+
+print(decode_review(padded[1]))
+print(training_sentences[1])
+
+# Agora vamos treinar o nosso modelo
+
+# Build a basic sentiment network
+# Note the embedding layer is first, 
+# and the output is only 1 node as it is either 0 or 1 (negative or positive)
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_length),
+    tf.keras.layers.Flatten(),
+    tf.keras.layers.Dense(6, activation='relu'),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+model.compile(loss='binary_crossentropy',optimizer='adam',metrics=['accuracy'])
+model.summary()
+
+# Podemos variar o número do num_epochs para melhorar a performance. Valores
+# maiores são bons para prevenir overfitting, mas gastam mais memória para treinar
+# o modelo, além de exigirem uma base de dados grande para que a acurácia possa
+# melhorar ao mesmo tempo que o num_epochs aumenta. Passar de 10 para 30 pode
+# ser uma boa nesse caso.
+
+num_epochs = 10
+model.fit(padded, training_labels_final, epochs=num_epochs, validation_data=(testing_padded, testing_labels_final))
+
+# Vamos ver como variou a acurácia a medida que o modelo foi sendo treinado
+
+import matplotlib.pyplot as plt
+
+def plot_graphs(history, string):
+  plt.plot(history.history[string])
+  plt.plot(history.history['val_'+string])
+  plt.xlabel("Epochs")
+  plt.ylabel(string)
+  plt.legend([string, 'val_'+string])
+  plt.show()
+  
+plot_graphs(history, "accuracy")
+plot_graphs(history, "loss")
+
+##################################################################################
+##### Se não me engano, esta parte só funciona se eu utilizar conjuntamente o
+##### colab, se eu estiver só no Python, posso pular esta parte de boa, basta
+##### desconsiderar tudo até a proxima barreira de '#'
+# Agora vamos baixar arquivos ncessários para que possamos visualizar os resultados
+# do nosso modelo de análise de linguagem natural.
+# Primeiro vamos eslabelecer os pesos da camada de embedding da nossa rede neural
+
+e = model.layers[0]
+weights = e.get_weights()[0]
+print(weights.shape) # shape: (vocab_size, embedding_dim)
+
+import io
+
+# Write out the embedding vectors and metadata
+
+out_v = io.open('vecs.tsv', 'w', encoding='utf-8')
+out_m = io.open('meta.tsv', 'w', encoding='utf-8')
+
+for word_num in range(1, vocab_size):
+  word = reverse_word_index[word_num]
+  embeddings = weights[word_num]
+  out_m.write(word + "\n")
+  out_v.write('\t'.join([str(x) for x in embeddings]) + "\n")
+
+out_v.close()
+out_m.close()
+
+# Agora vamos baixar os arquivos necessários para visualização de dados
+
+try:
+  from google.colab import files
+except ImportError:
+  pass
+else:
+  files.download('vecs.tsv')
+  files.download('meta.tsv')
+
+##################################################################################
+
+# Por fim vamos prever análise de sentimentos de novas sentenças, aquelas em nossa
+# base de teste
+
+fake_reviews = ['I love this phone', 'I hate spaghetti', 
+                'Everything was cold',
+                'Everything was hot exactly as I wanted', 
+                'Everything was green', 
+                'the host seated us immediately',
+                'they gave us free chocolate cake', 
+                'not sure about the wilted flowers on the table',
+                'only works when I stand on tippy toes', 
+                'does not work when I stand on my head']
+
+print(fake_reviews) 
+
+# Agora, vamos criar a sequência numérica
+
+padding_type='post'
+sample_sequences = tokenizer.texts_to_sequences(fake_reviews)
+fakes_padded = pad_sequences(sample_sequences, padding=padding_type, maxlen=max_length)           
+
+print('\nHOT OFF THE PRESS! HERE ARE SOME NEWLY MINTED, ABSOLUTELY GENUINE REVIEWS!\n')              
+
+classes = model.predict(fakes_padded)
+
+# Quanto mais próximo de 1, mais positivo foi provisão para a avaliação
+
+for x in range(len(fake_reviews)):
+  print(fake_reviews[x])
+  print(classes[x])
+  print('\n')
+
+# Tente adcionar sentenças por você mesmo
+# Adicione algumas palavras negativas às avaliações boas e veja no que dá
