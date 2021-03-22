@@ -1,0 +1,237 @@
+# Utilizando LSTM
+
+# Vamos comparar os resultados dos modolos de Embedding layer e um modelo
+# bidirecional LSTM.
+# Vamos trbalhar com uma base de dados com palavras e partes de palavras de um 
+# conjunto de avaliações de produtos e restaurantes. A base de dados é formada
+# por duas colunas, uma com a avaliação e outra com uma variável binária com o
+# valor 1 para análise favorável e 0 para análise desfavorável.
+# Vamos utilizar estes modelos para fazer análise de sentimentos das sentenças.
+
+# Vamos importar as bibliotecas que vamos utilizar
+
+import tensorflow as tf
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+
+# Vamos começar baixando a base de dados
+
+path = tf.keras.utils.get_file('reviews.csv','https://drive.google.com/uc?id=13ySLC_ue6Umt9RJYSeM2t-V0kCv-4C-P')
+print (path)
+import pandas as pd
+dataset = pd.read_csv(path)
+
+# Vamos extrar as sentenças e as avaliações (1 ou 0)
+
+sentences = dataset['text'].tolist()
+labels = dataset['sentiment'].tolist()
+
+# Vamos printar as duas primeiras sentenças e avaliações
+
+for x in range(2):
+  print(sentences[x])
+  print(labels[x])
+  print("\n")
+
+# Vamos criar um conjunto de dados com subpalavras utilizando afuncionalidade
+# SubwordTextEncoder do TensorFlow
+
+# SubwordTextEncoder.build_from_corpus() irá criar um tokenizador.
+# Vamos utilizar esta funcionalidade para criar sub-palavras com base na nossa
+# base de dados (pegar partes de palavras e treinar nosso modelo com base nelas
+# e nas palavras inteiras).
+# Vamos considerar apenas as 1000 subpalavras mais comuns, o que nos permite uma
+# acurácia maior do que se utilizássemos todas as palavras, vamos também limitar
+# essas subpalavras para que elas tenham, no máximo, cinco letras.
+
+import tensorflow_datasets as tfds
+
+vocab_size = 1000
+tokenizer = tfds.deprecated.text.SubwordTextEncoder.build_from_corpus(sentences, vocab_size, max_subword_length=5)
+
+# O quão grande é o nosso vocabulário? Quantas palavras distintas temos?
+
+print("Vocab size is ", tokenizer.vocab_size)
+
+# Observe que o tokenizador funcionou apropriadamente, pois, como vemos abaixo, as
+# sentenças foram transformadas em listas numéricas (que representam as palavras)
+
+num = 5
+print(sentences[num])
+encoded = tokenizer.encode(sentences[num])
+print(encoded)
+
+# Separadamente, vamos printar as sub-palavras
+
+for i in encoded:
+  print(tokenizer.decode([i]))
+
+# Agora vamos criar as sequências para serem utilizadas em nosso modelo
+# (transformar as palavras em sequências numéricas).
+
+for i, sentence in enumerate(sentences):
+  sentences[i] = tokenizer.encode(sentence)
+
+# Vamos verificar se as sentenças foram apropriadamente transformadas em listas
+# numéricas
+
+print(sentences[5])
+
+# Antes de treinar o modelo, ainda temos que fazer o padding as sequências
+# (colocar todas as sequências no mesmo tamanho, sendo necessário acresncentar
+# alguns parâmetros 0, por exemplos para as palavras menores), e separar a base
+# entre base de treino e teste.
+
+import numpy as np
+
+max_length = 50
+trunc_type='post'
+padding_type='post'
+
+# Fazer o "Pad" das sequências
+
+sequences_padded = pad_sequences(sentences, maxlen=max_length, padding=padding_type, truncating=trunc_type)
+
+# Separar as duas variáveis entre treino e teste
+
+training_size = int(len(sentences) * 0.8)
+
+training_sequences = sequences_padded[0:training_size]
+testing_sequences = sequences_padded[training_size:]
+training_labels = labels[0:training_size]
+testing_labels = labels[training_size:]
+
+# Vamos transformar os labels em numpy arrays, para utilizar no modelo
+
+training_labels_final = np.array(training_labels)
+testing_labels_final = np.array(testing_labels)
+
+# Vamos criar o modelo utilizando Embedding
+
+embedding_dim = 16
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_length),
+    tf.keras.layers.GlobalAveragePooling1D(), 
+    tf.keras.layers.Dense(6, activation='relu'),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+model.summary()
+
+# Trainando o modelo
+
+num_epochs = 30
+model.compile(loss='binary_crossentropy',optimizer='adam',metrics=['accuracy'])
+history = model.fit(training_sequences, training_labels_final, epochs=num_epochs, validation_data=(testing_sequences, testing_labels_final))
+
+# Vamos plotar a acurácia e loss a medida que treinamos o modelo
+
+import matplotlib.pyplot as plt
+
+def plot_graphs(history, string):
+  plt.plot(history.history[string])
+  plt.plot(history.history['val_'+string])
+  plt.xlabel("Epochs")
+  plt.ylabel(string)
+  plt.legend([string, 'val_'+string])
+  plt.show()
+
+# Vamos plotar os resultados
+
+plot_graphs(history, "accuracy")
+plot_graphs(history, "loss")
+
+# Vamos definir a função para prever o sentimento dos reviews
+# Iremos criar modelos com algumas diferenças e vamos utilizar cada modelo para
+# prever o sentimento de cada review.
+# Para economizar tempo, criaremos uma função que irá prever o sentimento de
+# qualquer sentença que quisermos. Quanto mais positivo o sentimento mais próximo
+# o resultado de 1, quanto mais negativo, mais próximo de zero.
+
+# A função irá pegar um review e nos dar como output, um valor numério entre 0 e 1
+# vamos colocar max_length = 100, ou seja, cada sentença deve ter no máximo 100
+# palavras.
+
+def predict_review(model, new_sentences, maxlen=max_length, show_padded_sequence=True ):
+  # Keep the original sentences so that we can keep using them later
+  # Create an array to hold the encoded sequences
+  new_sequences = []
+  # Convert the new reviews to sequences
+  for i, frvw in enumerate(new_sentences):new_sequences.append(tokenizer.encode(frvw))
+  trunc_type='post' 
+  padding_type='post'
+  # Pad all sequences for the new reviews
+  new_reviews_padded = pad_sequences(new_sequences, maxlen=max_length, padding=padding_type, truncating=trunc_type)             
+  classes = model.predict(new_reviews_padded)
+  # The closer the class is to 1, the more positive the review is
+  for x in range(len(new_sentences)):    
+    # We can see the padded sequence if desired
+    # Print the sequence
+    if (show_padded_sequence):
+      print(new_reviews_padded[x])
+    # Print the review as text
+    print(new_sentences[x])
+    # Print its predicted class
+    print(classes[x])
+    print("\n")
+
+# Vamos, então, utilizar o modelo para prever o reviews
+   
+fake_reviews = ["I love this phone", 
+                "Everything was cold",
+                "Everything was hot exactly as I wanted", 
+                "Everything was green", 
+                "the host seated us immediately",
+                "they gave us free chocolate cake", 
+                "we couldn't hear each other talk because of the shouting in the kitchen"
+              ]
+
+predict_review(model, fake_reviews)
+
+# Vamos definir uma função que irá definir o modelo, pegar os dados, treinar o
+# modelo, expor graficamente accuracy e loss, e por fim prever os resultados.
+
+def fit_model_now (model, sentences) :
+  model.compile(loss='binary_crossentropy',optimizer='adam',metrics=['accuracy'])
+  model.summary()
+  history = model.fit(training_sequences, training_labels_final, epochs=num_epochs, validation_data=(testing_sequences, testing_labels_final))
+  return history
+
+def plot_results (history):
+  plot_graphs(history, "accuracy")
+  plot_graphs(history, "loss")
+
+def fit_model_and_show_results (model, sentences):
+  history = fit_model_now(model, sentences)
+  plot_results(history)
+  predict_review(model, sentences)
+
+# Vamos adcionar o LSTM bidirecional 
+# Então vamos pegar a função que já tinhamos definido para criar o modelo,
+# treina-lo, mostrar graficamente a acurácia e loss, por fim prever os resultados.
+
+model_bidi_lstm = tf.keras.Sequential([
+    tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_length),
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)), 
+    tf.keras.layers.Dense(6, activation='relu'), 
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+# Por fim, vamos compilar e treinar o modelo e então mostrar as previsões para
+# as novas sentenças que quisermos adcionar
+
+fit_model_and_show_results(model_bidi_lstm, fake_reviews)
+
+# Por fim, vamos ver se um modelo multiplo de camadas bidirecionais melhora a
+# capacidade preditiva do modelo
+
+model_multiple_bidi_lstm = tf.keras.Sequential([
+    tf.keras.layers.Embedding(vocab_size, embedding_dim, input_length=max_length),
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim, 
+                                                       return_sequences=True)), 
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(embedding_dim)),
+    tf.keras.layers.Dense(6, activation='relu'),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+
+fit_model_and_show_results(model_multiple_bidi_lstm, fake_reviews)
